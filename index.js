@@ -31,6 +31,7 @@ const tls = require('tls');
   }
 })();
 
+const PORT = Number(process.env.PORT || 8082);
 const PROXY_ENV = process.env.HTTPS_PROXY || process.env.HTTP_PROXY || '';
 const PROXY_REQUIRED = String(process.env.PROXY_REQUIRED || '').toLowerCase() === 'true';
 const PROXY_CONNECT_TIMEOUT_MS = Number(process.env.PROXY_CONNECT_TIMEOUT_MS || 5000);
@@ -38,8 +39,6 @@ const NO_PROXY = (process.env.NO_PROXY || process.env.no_proxy || '')
   .split(',')
   .map(s => s.trim())
   .filter(Boolean);
-
-const KEY_REQUIRED = String(process.env.KEY_REQUIRED || '').toLowerCase() === 'true';
 
 function shouldBypassProxy(hostname) {
   return NO_PROXY.some(entry => {
@@ -58,6 +57,7 @@ class HttpsOverHttpProxyAgent extends https.Agent {
       throw new Error('HttpsOverHttpProxyAgent expects an http:// proxy URL');
     }
   }
+
   createConnection(options, callback) {
     const targetHost = options.host || options.hostname;
     const targetPort = options.port || 443;
@@ -71,11 +71,13 @@ class HttpsOverHttpProxyAgent extends https.Agent {
     const t = setTimeout(() => {
       socket.destroy(new Error('PROXY CONNECT timeout'));
     }, PROXY_CONNECT_TIMEOUT_MS);
+
     socket.once('error', err => {
       clearTimeout(t);
       callback(err);
     });
-      socket.once('connect', () => {
+
+    socket.once('connect', () => {
       clearTimeout(t);
       const connectHeaders = [
         `CONNECT ${targetHost}:${targetPort} HTTP/1.1`,
@@ -92,7 +94,8 @@ class HttpsOverHttpProxyAgent extends https.Agent {
         socket.destroy(new Error('PROXY CONNECT response timeout'));
         callback(new Error('PROXY CONNECT response timeout'));
       }, PROXY_CONNECT_TIMEOUT_MS);
-      const onData = (chunk) => {
+
+      const onData = chunk => {
         buffered += chunk.toString('latin1');
         const headerEnd = buffered.indexOf('\r\n\r\n');
         if (headerEnd === -1) return;
@@ -110,6 +113,7 @@ class HttpsOverHttpProxyAgent extends https.Agent {
         }, () => callback(null, tlsSocket));
         tlsSocket.once('error', err => callback(err));
       };
+
       socket.on('data', onData);
     });
   }
@@ -118,15 +122,18 @@ class HttpsOverHttpProxyAgent extends https.Agent {
 function getUpstreamAgentFor(hostname) {
   if (!PROXY_ENV) return null;
   if (shouldBypassProxy(hostname)) return null;
+
   if (PROXY_ENV.startsWith('http://')) {
     return new HttpsOverHttpProxyAgent(PROXY_ENV);
   }
+
   if (PROXY_ENV.startsWith('https://')) {
     class HttpsOverHttpsProxyAgent extends https.Agent {
       constructor(proxyUrl) {
         super({ keepAlive: true });
         this.proxy = new URL(proxyUrl);
       }
+
       createConnection(options, callback) {
         const targetHost = options.host || options.hostname;
         const targetPort = options.port || 443;
@@ -139,10 +146,12 @@ function getUpstreamAgentFor(hostname) {
         const t = setTimeout(() => {
           proxyTls.destroy(new Error('PROXY CONNECT timeout'));
         }, PROXY_CONNECT_TIMEOUT_MS);
+
         proxyTls.once('error', err => {
           clearTimeout(t);
           callback(err);
         });
+
         proxyTls.once('secureConnect', () => {
           clearTimeout(t);
           const lines = [
@@ -153,13 +162,15 @@ function getUpstreamAgentFor(hostname) {
           if (proxyAuth) lines.push(`Proxy-Authorization: ${proxyAuth}`);
           lines.push('', '');
           proxyTls.write(lines.join('\r\n'));
+
           let buffered = '';
           const t2 = setTimeout(() => {
             proxyTls.removeListener('data', onData);
             proxyTls.destroy(new Error('PROXY CONNECT response timeout'));
             callback(new Error('PROXY CONNECT response timeout'));
           }, PROXY_CONNECT_TIMEOUT_MS);
-          const onData = (chunk) => {
+
+          const onData = chunk => {
             buffered += chunk.toString('latin1');
             const headerEnd = buffered.indexOf('\r\n\r\n');
             if (headerEnd === -1) return;
@@ -174,89 +185,62 @@ function getUpstreamAgentFor(hostname) {
             const tlsSocket = tls.connect({ socket: proxyTls, servername: targetHost }, () => callback(null, tlsSocket));
             tlsSocket.once('error', err => callback(err));
           };
+
           proxyTls.on('data', onData);
         });
       }
     }
+
     return new HttpsOverHttpsProxyAgent(PROXY_ENV);
   }
+
   return null;
 }
-
-const CONFIG_PATH = path.join(__dirname, 'config.json');
-let config;
-try {
-  config = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8'));
-} catch (e) {
-  console.error(`Failed to read config.json: ${e.message}`);
-  process.exit(1);
-}
-
-const PORT = config.port || 8082;
-let KEYS = config.keys || [];
 
 const ENV_KEYS = (process.env.ANTHROPIC_API_KEYS || '')
   .split(',')
   .map(s => s.trim())
   .filter(Boolean)
-  .map((key, i) => ({ name: `env${i+1}`, key }));
-const SINGLE_ENV_KEY = process.env.ANTHROPIC_API_KEY ? [{ name: 'env', key: process.env.ANTHROPIC_API_KEY }] : [];
-if (ENV_KEYS.length) {
-  KEYS = ENV_KEYS;
-} else if (SINGLE_ENV_KEY.length) {
-  KEYS = SINGLE_ENV_KEY;
-}
-
+  .map((key, i) => ({ name: `env${i + 1}`, key }));
+const SINGLE_ENV_KEY = process.env.ANTHROPIC_API_KEY
+  ? [{ name: 'env', key: process.env.ANTHROPIC_API_KEY }]
+  : [];
 const CLAUDE_CODE_BETA = 'claude-code-20250219';
 const SYSTEM_PROMPT = "You are Claude Code, Anthropic's official CLI for Claude.";
-
 const AUTH_METHODS = [];
-
 const AUTH_TOKEN = process.env.ANTHROPIC_AUTH_TOKEN || '';
+
 if (AUTH_TOKEN) {
   AUTH_METHODS.push({ type: 'bearer', name: 'token', token: AUTH_TOKEN });
 }
 
 if (ENV_KEYS.length) {
   ENV_KEYS.forEach(k => AUTH_METHODS.push({ type: 'apikey', name: k.name, key: k.key }));
-} else if (SINGLE_ENV_KEY.length) {
-  AUTH_METHODS.push({ type: 'apikey', name: SINGLE_ENV_KEY[0].name, key: SINGLE_ENV_KEY[0].key });
 }
 
-for (const k of KEYS) {
-  if (!AUTH_METHODS.some(m => m.type === 'apikey' && m.key === k.key)) {
-    AUTH_METHODS.push({ type: 'apikey', name: k.name, key: k.key });
-  }
+if (SINGLE_ENV_KEY.length && !AUTH_METHODS.some(m => m.type === 'apikey' && m.key === SINGLE_ENV_KEY[0].key)) {
+  AUTH_METHODS.push({ type: 'apikey', name: SINGLE_ENV_KEY[0].name, key: SINGLE_ENV_KEY[0].key });
 }
 
 const clientAuthCache = new Map();
 
-function applyAuthHeaders(headers, method, selectedKey) {
+function applyAuthHeaders(headers, method) {
   if (method.type === 'bearer') {
-    headers['Authorization'] = `Bearer ${method.token}`;
+    headers.Authorization = `Bearer ${method.token}`;
     delete headers['x-api-key'];
-  } else {
-    headers['x-api-key'] = method.key;
-    delete headers['Authorization'];
+    return;
   }
+
+  headers['x-api-key'] = method.key;
+  delete headers.Authorization;
 }
 
 let keyIndex = 0;
 
-function getNextKey() {
-  const entry = KEYS[keyIndex % KEYS.length];
-  keyIndex++;
-  return entry;
-}
-
-function getKeyByName(name) {
-  return KEYS.find(k => k.name === name);
-}
-
 const server = http.createServer((req, res) => {
   if (req.method === 'GET' && req.url === '/health') {
     res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ status: 'ok', methods: AUTH_METHODS.length, strategy: config.strategy }));
+    res.end(JSON.stringify({ status: 'ok', methods: AUTH_METHODS.length, port: PORT }));
     return;
   }
 
@@ -268,7 +252,6 @@ const server = http.createServer((req, res) => {
       methods: AUTH_METHODS.map(m => m.type === 'apikey'
         ? { type: m.type, name: m.name, key: m.key.slice(0, 20) + '...' }
         : { type: m.type, name: m.name }),
-      strategy: config.strategy,
       requestsServed: keyIndex
     }));
     return;
@@ -331,7 +314,7 @@ const server = http.createServer((req, res) => {
       'Content-Type': 'application/json',
       'anthropic-version': req.headers['anthropic-version'] || '2023-06-01',
     };
-    applyAuthHeaders(upstreamHeaders, selectedMethod, selectedMethod);
+    applyAuthHeaders(upstreamHeaders, selectedMethod);
 
     const clientBeta = req.headers['anthropic-beta'] || '';
     const betaParts = clientBeta ? clientBeta.split(',').map(s => s.trim()) : [];
@@ -340,7 +323,7 @@ const server = http.createServer((req, res) => {
     }
     upstreamHeaders['anthropic-beta'] = betaParts.join(',');
 
-    if (req.headers['accept']) upstreamHeaders['accept'] = req.headers['accept'];
+    if (req.headers.accept) upstreamHeaders.accept = req.headers.accept;
 
     const payload = JSON.stringify(body);
     upstreamHeaders['content-length'] = Buffer.byteLength(payload);
@@ -355,12 +338,13 @@ const server = http.createServer((req, res) => {
     };
     const agent = getUpstreamAgentFor('api.anthropic.com');
     if (agent) requestOptions.agent = agent;
-    const upstreamReq = https.request(requestOptions, (upstreamRes) => {
+
+    const upstreamReq = https.request(requestOptions, upstreamRes => {
       const elapsed = Date.now() - startTime;
       const model = body.model || '?';
       const isStream = body.stream === true;
 
-      console.log(`[${new Date().toISOString()}] [${keySource}] ${selectedMethod.name} → ${model} ${isStream ? '(stream)' : ''} → ${upstreamRes.statusCode} (${elapsed}ms)`);
+      console.log(`[${new Date().toISOString()}] [${keySource}] ${selectedMethod.name} -> ${model} ${isStream ? '(stream)' : ''} -> ${upstreamRes.statusCode} (${elapsed}ms)`);
 
       if (upstreamRes.statusCode < 400 && selectedMethod.type !== 'passthrough') {
         clientAuthCache.set(clientIp, { type: selectedMethod.type, name: selectedMethod.name });
@@ -373,7 +357,7 @@ const server = http.createServer((req, res) => {
         if (otherMethod) {
           clientAuthCache.delete(clientIp);
           console.log(`  -> Auth fail on ${selectedMethod.name}, retrying with ${otherMethod.name}`);
-          applyAuthHeaders(upstreamHeaders, otherMethod, otherMethod);
+          applyAuthHeaders(upstreamHeaders, otherMethod);
           const retryOptions = {
             hostname: 'api.anthropic.com',
             port: 443,
@@ -383,7 +367,7 @@ const server = http.createServer((req, res) => {
           };
           const retryAgent = getUpstreamAgentFor('api.anthropic.com');
           if (retryAgent) retryOptions.agent = retryAgent;
-          const retryReq = https.request(retryOptions, (retryRes) => {
+          const retryReq = https.request(retryOptions, retryRes => {
             const retryElapsed = Date.now() - startTime;
             console.log(`  -> Retry ${retryRes.statusCode} (${retryElapsed}ms)`);
             if (retryRes.statusCode < 400 && otherMethod.type !== 'passthrough') {
@@ -392,7 +376,7 @@ const server = http.createServer((req, res) => {
             res.writeHead(retryRes.statusCode, retryRes.headers);
             retryRes.pipe(res);
           });
-          retryReq.on('error', (e) => {
+          retryReq.on('error', e => {
             res.writeHead(502, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({ error: `Retry upstream error: ${e.message}` }));
           });
@@ -407,7 +391,7 @@ const server = http.createServer((req, res) => {
         const nextMethod = AUTH_METHODS[(AUTH_METHODS.indexOf(selectedMethod) + 1) % AUTH_METHODS.length];
         if (nextMethod.type === 'apikey' && nextMethod.key !== selectedMethod.key) {
           console.log(`  -> 429 on ${selectedMethod.name}, retrying with ${nextMethod.name}`);
-          applyAuthHeaders(upstreamHeaders, nextMethod, nextMethod);
+          applyAuthHeaders(upstreamHeaders, nextMethod);
           const retryOptions = {
             hostname: 'api.anthropic.com',
             port: 443,
@@ -417,12 +401,12 @@ const server = http.createServer((req, res) => {
           };
           const retryAgent = getUpstreamAgentFor('api.anthropic.com');
           if (retryAgent) retryOptions.agent = retryAgent;
-          const retryReq = https.request(retryOptions, (retryRes) => {
+          const retryReq = https.request(retryOptions, retryRes => {
             console.log(`  -> Retry ${retryRes.statusCode}`);
             res.writeHead(retryRes.statusCode, retryRes.headers);
             retryRes.pipe(res);
           });
-          retryReq.on('error', (e) => {
+          retryReq.on('error', e => {
             res.writeHead(502, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({ error: `Retry upstream error: ${e.message}` }));
           });
@@ -437,7 +421,7 @@ const server = http.createServer((req, res) => {
       upstreamRes.pipe(res);
     });
 
-    upstreamReq.on('error', (e) => {
+    upstreamReq.on('error', e => {
       console.error(`Upstream error: ${e.message}`);
       res.writeHead(502, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ error: `Upstream error: ${e.message}` }));
@@ -453,19 +437,21 @@ const server = http.createServer((req, res) => {
     console.error('Startup error: PROXY_REQUIRED=true but no HTTPS_PROXY/HTTP_PROXY is set');
     process.exit(1);
   }
-  if (KEY_REQUIRED) {
-    if (!AUTH_METHODS.length && !process.env.ANTHROPIC_API_KEY && !process.env.ANTHROPIC_API_KEYS) {
-      console.error('Startup error: KEY_REQUIRED=true but no ANTHROPIC_API_KEY/ANTHROPIC_API_KEYS/ANTHROPIC_AUTH_TOKEN env or config.keys provided');
-      process.exit(1);
-    }
+
+  if (!AUTH_METHODS.length) {
+    console.error('Startup error: no ANTHROPIC_AUTH_TOKEN, ANTHROPIC_API_KEY, or ANTHROPIC_API_KEYS provided');
+    process.exit(1);
   }
+
   if (PROXY_ENV) {
     const masked = (() => {
       try {
         const u = new URL(PROXY_ENV);
         if (u.password) u.password = '*****';
         return u.toString();
-      } catch { return PROXY_ENV; }
+      } catch {
+        return PROXY_ENV;
+      }
     })();
     console.log(`Using upstream proxy: ${masked}`);
     const agent = getUpstreamAgentFor('api.anthropic.com');
@@ -481,13 +467,13 @@ const server = http.createServer((req, res) => {
         path: '/',
         agent,
         timeout: PROXY_CONNECT_TIMEOUT_MS,
-      }, (r) => {
+      }, r => {
         r.resume();
       });
       testReq.on('timeout', () => {
         testReq.destroy(new Error('PROXY CONNECT timeout'));
       });
-      testReq.on('error', (e) => {
+      testReq.on('error', e => {
         console.error(`Startup error: Proxy self-check failed: ${e.message}`);
         if (PROXY_REQUIRED) process.exit(1);
       });
@@ -499,9 +485,8 @@ const server = http.createServer((req, res) => {
 server.listen(PORT, '127.0.0.1', () => {
   console.log(`\nClaude Code Proxy running on http://127.0.0.1:${PORT}`);
   console.log(`   Auth methods: ${AUTH_METHODS.map(m => m.type + '(' + m.name + ')').join(', ') || 'none'}`);
-  console.log(`   Strategy: ${config.strategy}`);
-  console.log(`   Endpoints:`);
-  console.log(`     POST /v1/messages  -> proxied to Anthropic`);
-  console.log(`     GET  /health       -> health check`);
-  console.log(`     GET  /status       -> key status\n`);
+  console.log('   Endpoints:');
+  console.log('     POST /v1/messages  -> proxied to Anthropic');
+  console.log('     GET  /health       -> health check');
+  console.log('     GET  /status       -> key status\n');
 });

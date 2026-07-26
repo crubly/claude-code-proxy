@@ -6,13 +6,11 @@ Local proxy for Anthropic-compatible clients that routes requests through a Clau
 
 The server listens on `http://127.0.0.1:8082`, forwards requests to `https://api.anthropic.com`, adds the Claude Code beta header, and injects the Claude Code system prompt.
 
-Supported auth sources:
+Auth is always required. The proxy will not start unless one of these variables is set:
 
 - `ANTHROPIC_AUTH_TOKEN`
 - `ANTHROPIC_API_KEY`
 - `ANTHROPIC_API_KEYS`
-
-Port configuration lives in [config.json](/Users/fat/Documents/claude-code-proxy/config.json:1).
 
 ## Quick start
 
@@ -26,6 +24,7 @@ node index.js
 Recommended:
 
 ```dotenv
+PORT=8082
 ANTHROPIC_AUTH_TOKEN=your_access_token
 ```
 
@@ -39,10 +38,11 @@ HTTP_PROXY=
 NO_PROXY=
 PROXY_REQUIRED=false
 PROXY_CONNECT_TIMEOUT_MS=5000
-KEY_REQUIRED=false
 ```
 
 See [.env.example](/Users/fat/Documents/claude-code-proxy/.env.example:1) for the full template.
+
+If `PORT` is not set, the default is `8082`.
 
 ## Getting the token on macOS
 
