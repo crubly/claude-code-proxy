@@ -1,0 +1,8 @@
+proxy.log
+*.log
+start.sh
+node_modules/
+.DS_Store
+.env
+.env.*
+!.env.example
