@@ -1,33 +1,35 @@
 # Claude Code Proxy
 
-This is a local proxy that sends Anthropic-compatible requests through a Claude Code subscription.
+Local proxy for Anthropic-compatible clients that routes requests through a Claude Code subscription.
 
-## What it does
+## Overview
 
-- accepts requests on `http://127.0.0.1:8082`
-- forwards them to `https://api.anthropic.com`
-- adds the Claude Code beta header
-- injects the Claude Code system prompt
-- can use `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_API_KEY`, or `ANTHROPIC_API_KEYS`
+The server listens on `http://127.0.0.1:8082`, forwards requests to `https://api.anthropic.com`, adds the Claude Code beta header, and injects the Claude Code system prompt.
 
-## Start
+Supported auth sources:
+
+- `ANTHROPIC_AUTH_TOKEN`
+- `ANTHROPIC_API_KEY`
+- `ANTHROPIC_API_KEYS`
+
+Port configuration lives in [config.json](/Users/fat/Documents/claude-code-proxy/config.json:1).
+
+## Quick start
 
 ```bash
 cp .env.example .env
 node index.js
 ```
 
-Port is configured in [config.json](/Users/fat/Documents/claude-code-proxy/config.json:1).
+## Environment
 
-## .env
-
-Main variable:
+Recommended:
 
 ```dotenv
 ANTHROPIC_AUTH_TOKEN=your_access_token
 ```
 
-Optional variables:
+Optional:
 
 ```dotenv
 ANTHROPIC_API_KEY=
@@ -40,19 +42,17 @@ PROXY_CONNECT_TIMEOUT_MS=5000
 KEY_REQUIRED=false
 ```
 
-## How to get the token on macOS
+See [.env.example](/Users/fat/Documents/claude-code-proxy/.env.example:1) for the full template.
 
-1. Log in to Claude CLI.
-2. Run:
+## Getting the token on macOS
+
+First log in to Claude CLI, then run:
 
 ```bash
 security find-generic-password -s "Claude Code-credentials" -w 2>/dev/null
 ```
 
-3. In the returned data, find the `accessToken` value.
-4. Put that value into `ANTHROPIC_AUTH_TOKEN`.
-
-The `accessToken` variable is the one you need.
+Find the `accessToken` value in the output and put it into `ANTHROPIC_AUTH_TOKEN`.
 
 ## Example request
 
@@ -75,4 +75,4 @@ curl http://127.0.0.1:8082/v1/messages \
 
 ## Requirements
 
-- Node.js 18+
+- Node.js 18 or newer
